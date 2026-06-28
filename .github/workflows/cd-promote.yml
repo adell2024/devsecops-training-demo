@@ -1,0 +1,57 @@
+name: CD - Promote Staging to Stable
+
+# Promotion = acte volontaire des Ops, déclenché manuellement APRES la merge
+# de develop vers main. AUCUN build ici : on copie le manifeste de l'image
+# (docker buildx imagetools), ce qui préserve le digest SHA256 à l'identique.
+# C'est la preuve qu'on déploie en prod EXACTEMENT ce qui a été validé en staging.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à promouvoir (ex: 1.0.0), doit déjà exister en staging"
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    # En pratique : protéger cet environnement dans Settings > Environments
+    # et exiger une "required reviewer" = équipe Ops avant exécution.
+    environment: production
+    steps:
+      - name: Connexion au registre GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copier le manifeste staging -> stable (aucun rebuild)
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable-${{ github.event.inputs.version }} \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable-latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.event.inputs.version }}
+
+      - name: Vérifier que les digests sont identiques
+        run: |
+          DIGEST_STAGING=$(docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.event.inputs.version }} \
+            --format '{{json .Manifest.Digest}}')
+          DIGEST_STABLE=$(docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable-${{ github.event.inputs.version }} \
+            --format '{{json .Manifest.Digest}}')
+          echo "Digest staging : $DIGEST_STAGING"
+          echo "Digest stable  : $DIGEST_STABLE"
+          if [ "$DIGEST_STAGING" != "$DIGEST_STABLE" ]; then
+            echo "ERREUR : les digests diffèrent, la promotion n'a pas préservé l'artefact !"
+            exit 1
+          fi
+          echo "OK : artefact identique, promotion validée sans reconstruction."
