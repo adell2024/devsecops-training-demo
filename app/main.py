@@ -27,3 +27,14 @@ def version() -> dict:
     import os
 
     return {"version": os.getenv("APP_VERSION", "dev")}
+
+@app.get("/info")
+def info() -> dict:
+    """Endpoint d'information sur l'application, utile pour le monitoring."""
+    import os
+
+    return {
+        "app_name": "devsecops-training-demo",
+        "status": "running",
+        "version": os.getenv("APP_VERSION", "dev"),
+    }
