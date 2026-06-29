@@ -149,10 +149,10 @@ jobs:
       - name: Scan de l'image (Trivy)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'scan-target:latest'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+          image-ref: "scan-target:latest"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
           ignore-unfixed: true
 
       - name: Smoke test du conteneur
@@ -187,6 +187,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Installer Cosign
+        uses: sigstore/cosign-installer@v3.6.0
+
+      - name: Signer les images avec Cosign (keyless, OIDC GitHub)
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.SCRATCH_TAG }}
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scratch-latest
+
+      - name: Vérifier la signature Cosign
+        run: |
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.SCRATCH_TAG }}
+
       - name: Résumé de publication
         run: |
           echo "Image scratch publiée :"
@@ -195,8 +212,3 @@ jobs:
           echo ""
           echo "Cette image est destinée au développement/training uniquement."
           echo "Pour la production, utiliser le pipeline CD staging -> promote."
-
-      # ─── Vérifier la signature (preuve) ───
-      - name: Vérifier la signature Cosign
-        run: |
-          cosign verify             --certificate-identity-regexp="https://github.com/${{ github.repository }}/"             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scratch-1.0.0
