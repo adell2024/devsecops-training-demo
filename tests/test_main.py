@@ -35,3 +35,11 @@ def test_ping() -> None:
     response = client.get("/ping")
     assert response.status_code == 200
     assert response.json() == {"pong": True}
+
+
+def test_about() -> None:
+    response = client.get("/about")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["project"] == "devsecops-training-demo"
+    assert body["author"] == "adell2024"

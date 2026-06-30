@@ -56,3 +56,13 @@ def stats() -> dict:
 def ping() -> dict:
     """Endpoint minimal de test, pour valider rapidement le cycle CI/CD."""
     return {"pong": True}
+
+
+@app.get("/about")
+def about() -> dict:
+    """Informations générales sur le projet."""
+    return {
+        "project": "devsecops-training-demo",
+        "author": "adell2024",
+        "description": "Projet d'entraînement DevSecOps",
+    }
