@@ -1,15 +1,18 @@
 name: CD - Promote Staging to Stable
 
 # Promotion = acte volontaire des Ops, déclenché manuellement APRES la merge
-# de develop vers master. AUCUN build ici : on copie l'image
-# octet pour octet avec skopeo, ce qui préserve le digest SHA256 à
-# l'identique. C'est la preuve qu'on déploie en prod EXACTEMENT ce qui a
-# été validé en staging.
+# de develop vers master. AUCUN build ici : on copie l'image octet pour
+# octet avec skopeo, ce qui préserve le digest SHA256 à l'identique.
+#
+# Garde-fou supplémentaire : avant toute copie, on vérifie que l'image
+# staging porte bien une signature Cosign valide, émise par CE repo via
+# CE workflow GitHub Actions. Si l'image n'est pas signée (ex: tag poussé
+# manuellement en contournant cd-staging.yml), la promotion est refusée.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version à promouvoir (ex: 1.0.0), doit déjà exister en staging"
+        description: "Version à promouvoir (ex: 1.0.0), doit déjà exister en staging ET être signée"
         required: true
         type: string
 
@@ -23,17 +26,30 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     environment: production
     steps:
-      - name: Installer skopeo
-        run: sudo apt-get update && sudo apt-get install -y skopeo
+      - name: Installer Cosign
+        uses: sigstore/cosign-installer@v3.6.0
 
-      - name: Connexion au registre GHCR
+      - name: Installer skopeo
+        run: sudo apt-get update && sudo apt-get install -y skopeo jq
+
+      - name: Connexion au registre GHCR (skopeo)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
 
-      - name: Copier l'image staging -> stable (copie bit-à-bit, aucun rebuild)
+      - name: GARDE-FOU - Verifier la signature Cosign avant toute promotion
+        run: |
+          echo "Verification de la signature de l'image staging-${{ github.event.inputs.version }}..."
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.event.inputs.version }}
+          echo "Signature valide : la promotion peut continuer."
+
+      - name: Copier image staging vers stable (copie bit-a-bit, aucun rebuild)
         run: |
           skopeo copy --all \
             docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.event.inputs.version }} \
@@ -43,7 +59,7 @@ jobs:
             docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.event.inputs.version }} \
             docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable-latest
 
-      - name: Vérifier que les digests sont identiques
+      - name: Verifier que les digests sont identiques
         run: |
           DIGEST_STAGING=$(skopeo inspect \
             docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.event.inputs.version }} \
@@ -54,7 +70,14 @@ jobs:
           echo "Digest staging : $DIGEST_STAGING"
           echo "Digest stable  : $DIGEST_STABLE"
           if [ "$DIGEST_STAGING" != "$DIGEST_STABLE" ]; then
-            echo "ERREUR : les digests diffèrent, la promotion n'a pas préservé l'artefact !"
+            echo "ERREUR : les digests differents, promotion non conforme !"
             exit 1
           fi
-          echo "OK : artefact identique, promotion validée sans reconstruction."
+          echo "OK : artefact identique, promotion validee sans reconstruction."
+
+      - name: Signer aussi l'image stable (nouvelle identite de signature)
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable-${{ github.event.inputs.version }}
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable-latest
