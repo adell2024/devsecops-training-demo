@@ -28,6 +28,7 @@ def version() -> dict:
 
     return {"version": os.getenv("APP_VERSION", "dev")}
 
+
 @app.get("/info")
 def info() -> dict:
     """Endpoint d'information sur l'application, utile pour le monitoring."""

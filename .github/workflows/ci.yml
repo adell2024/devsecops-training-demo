@@ -1,8 +1,15 @@
-name: CI - Validation
+name: CI - Validation & Build Scratch
 
-# CI = "est-ce que le code est bon ?"
+# CI = "est-ce que le code est bon ?" + "est-ce que l'image est saine ?"
 # Se déclenche sur toute branche de travail ET sur les Pull Requests
-# vers develop ou main. Ne publie JAMAIS d'artefact.
+# vers develop ou master.
+#
+# Ce pipeline publie une image de développement/scratch pour démo/training
+# avec un tag UNIQUE par run (ex: scratch-42-abc1234), jamais figé en dur.
+# ATTENTION : pour que le push GHCR fonctionne sur les événements
+# pull_request, le repo doit avoir : Settings > Actions > General >
+# Workflow permissions = "Read and write permissions".
+
 on:
   push:
     branches:
@@ -14,12 +21,31 @@ on:
       - "develop"
       - "master"
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+
 jobs:
-  lint-and-test:
+  # ───────────────────────────────────────────────
+  # JOB 1 : Sécurité & Qualité du code
+  # ───────────────────────────────────────────────
+  security-and-quality:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan de secrets (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,11 +56,159 @@ jobs:
       - name: Installer les dépendances
         run: pip install -r requirements.txt
 
+      - name: Audit des dépendances (pip-audit)
+        # continue-on-error : ce contrôle est informationnel pour l'instant.
+        # Le futur Module 5 (Analyse des dépendances) le rendra bloquant,
+        # avec une vraie procédure de remédiation.
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --desc --format=markdown
+        continue-on-error: true
+
+      - name: SAST Python (Bandit)
+        run: |
+          pip install "bandit[toml]"
+          bandit -r app/ -ll
+        continue-on-error: true
+
       - name: Lint (ruff)
-        run: ruff check app/ tests/
+        run: |
+          pip install ruff
+          ruff check app/ tests/
+          ruff format --check app/ tests/
 
-      - name: Tests (pytest)
-        run: pytest -v
+      - name: Tests (pytest + coverage)
+        run: |
+          pip install pytest pytest-cov
+          pytest -v --cov=app --cov-report=term
 
-      - name: Build Docker (validation uniquement, pas de push)
-        run: docker build -t ci-validation:${{ github.sha }} .
+  # ───────────────────────────────────────────────
+  # JOB 2 : Validation du Dockerfile
+  # ───────────────────────────────────────────────
+  dockerfile-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile (Hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          # Pas d'upload SARIF ici : nécessite GitHub Advanced Security,
+          # indisponible sur repo privé. Résultat affiché en clair
+          # directement dans les logs de ce step.
+          config: .hadolint.yaml
+          no-fail: false
+
+  # ───────────────────────────────────────────────
+  # JOB 3 : Build, Scan & Publish Scratch Image
+  # ───────────────────────────────────────────────
+  build-scan-publish-scratch:
+    needs: [security-and-quality, dockerfile-lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Définir un tag unique pour ce run
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "SCRATCH_TAG=scratch-${{ github.run_number }}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Connexion au registre GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build image locale (pour scan, pas encore publiée)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: |
+            scan-target:latest
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.SCRATCH_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan de l'image (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "scan-target:latest"
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+
+      - name: Smoke test du conteneur
+        run: |
+          docker run -d --name smoke-test -p 8000:8000 scan-target:latest
+          echo "Attente du démarrage..."
+          sleep 10
+          echo "--- Logs du conteneur ---"
+          docker logs smoke-test
+          echo "--- Test de l'endpoint /health ---"
+          curl -sf http://localhost:8000/health
+          docker stop smoke-test
+          docker rm smoke-test
+
+      - name: Build et push image scratch
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.SCRATCH_TAG }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scratch-latest
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.SCRATCH_TAG }}
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.description=Image scratch de démonstration/training
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Installer Cosign
+        uses: sigstore/cosign-installer@v3.6.0
+
+      - name: Signer les images avec Cosign (keyless, OIDC GitHub)
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.SCRATCH_TAG }}
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scratch-latest
+
+      - name: Vérifier la signature Cosign
+        run: |
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.SCRATCH_TAG }}
+
+      - name: Résumé de publication
+        run: |
+          echo "Image scratch publiée :"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.SCRATCH_TAG }}"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:scratch-latest"
+          echo ""
+          echo "Cette image est destinée au développement/training uniquement."
+          echo "Pour la production, utiliser le pipeline CD staging -> promote."

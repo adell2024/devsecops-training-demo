@@ -1,0 +1,13 @@
+# Configuration Hadolint pour ce projet.
+#
+# DL3008 (pin versions in apt-get install) est volontairement ignorée :
+# ce Dockerfile fait délibérément "apt-get upgrade" pour toujours obtenir
+# les derniers correctifs de sécurité disponibles (objectif : limiter les
+# CVE détectées par Trivy sur les paquets système). Figer des versions
+# précises irait à l'encontre de cet objectif et casserait le build dès
+# que Debian retire l'ancienne version de ses dépôts.
+#
+# Compromis assumé : moindre reproductibilité bit-à-bit du build au
+# bénéfice d'une meilleure hygiène de sécurité continue.
+ignored:
+  - DL3008

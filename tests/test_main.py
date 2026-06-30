@@ -16,6 +16,7 @@ def test_version_default() -> None:
     assert response.status_code == 200
     assert "version" in response.json()
 
+
 def test_info() -> None:
     response = client.get("/info")
     assert response.status_code == 200
