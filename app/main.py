@@ -7,8 +7,10 @@ workflows Git / CI / CD / promotion d'artefacts.
 """
 
 from fastapi import FastAPI
+from app.metrics import metrics, metrics_middleware
 
 app = FastAPI(title="devsecops-training-demo")
+app.middleware("http")(metrics_middleware)
 
 
 @app.get("/health")
@@ -66,3 +68,9 @@ def about() -> dict:
         "author": "adell2024",
         "description": "Projet d'entraînement DevSecOps",
     }
+
+
+@app.get("/metrics")
+def get_metrics() -> dict:
+    """Endpoint de métriques : compteurs de requêtes par méthode/statut."""
+    return {"metrics": metrics.get_all()}
