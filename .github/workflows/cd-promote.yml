@@ -39,7 +39,15 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
-
+            
+      - name: Connexion au registre GHCR (Docker, requis par Cosign)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      
       - name: GARDE-FOU - Verifier la signature Cosign avant toute promotion
         run: |
           echo "Verification de la signature de l'image staging-${{ github.event.inputs.version }}..."
