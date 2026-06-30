@@ -29,3 +29,9 @@ def test_stats_increments() -> None:
     first = client.get("/stats").json()["stats_calls"]
     second = client.get("/stats").json()["stats_calls"]
     assert second == first + 1
+
+
+def test_ping() -> None:
+    response = client.get("/ping")
+    assert response.status_code == 200
+    assert response.json() == {"pong": True}

@@ -50,3 +50,9 @@ def stats() -> dict:
     global _request_count
     _request_count += 1
     return {"stats_calls": _request_count}
+
+
+@app.get("/ping")
+def ping() -> dict:
+    """Endpoint minimal de test, pour valider rapidement le cycle CI/CD."""
+    return {"pong": True}
