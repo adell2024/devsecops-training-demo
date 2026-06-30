@@ -1,4 +1,4 @@
-name: CI - Validation & Build Scratch
+name: CI - Scratch - Validation & Build
 
 # CI = "est-ce que le code est bon ?" + "est-ce que l'image est saine ?"
 # Se déclenche sur toute branche de travail ET sur les Pull Requests

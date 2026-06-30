@@ -1,4 +1,4 @@
-name: CD - Build & Publish Staging
+name: CI - Staging - Build & Publish
 
 # Staging doit être AU MOINS aussi strict que Scratch, idéalement plus :
 # c'est la dernière étape qui construit réellement l'artefact. Cet artefact

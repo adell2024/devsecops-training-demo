@@ -1,4 +1,4 @@
-name: CD - Promote Staging to Stable
+name: CI - Promote - Staging to Stable
 
 # Promotion = acte volontaire des Ops, déclenché manuellement APRES la merge
 # de develop vers master. AUCUN build ici : on copie l'image octet pour
