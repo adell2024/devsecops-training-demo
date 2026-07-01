@@ -1,7 +1,5 @@
 """
 Middleware et endpoint de métriques simples (en mémoire).
-En production, on utiliserait Prometheus/StatsD. Ici, c'est volontairement
-minimal pour l'entraînement DevSecOps.
 """
 
 from collections import defaultdict
@@ -24,20 +22,29 @@ class MetricsCollector:
         return dict(self._counters)
 
     def reset(self) -> None:
-        """Réinitialise les compteurs (utile pour les tests)."""
+        """Réinitialise les compteurs."""
         self._counters.clear()
 
 
-# Instance globale (volontairement simple pour ce training)
 metrics = MetricsCollector()
 
 
 async def metrics_middleware(request: Request, call_next) -> Response:
     """Middleware FastAPI qui enregistre chaque requête."""
-    response = await call_next(request)
-    metrics.record(
-        method=request.method,
-        path=request.url.path,
-        status_code=response.status_code,
-    )
-    return response
+    try:
+        response = await call_next(request)
+        metrics.record(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+        )
+        return response
+    except Exception as e:
+        # Enregistrer l'erreur même si le middleware suivant lève une exception
+        status_code = getattr(e, "status_code", 500)
+        metrics.record(
+            method=request.method,
+            path=request.url.path,
+            status_code=status_code,
+        )
+        raise
