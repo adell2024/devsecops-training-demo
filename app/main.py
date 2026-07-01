@@ -1,31 +1,24 @@
 """
 Application FastAPI minimale - support d'entraînement DevSecOps.
-
-Volontairement simple : l'objectif de ce projet n'est PAS la complexité
-applicative, mais de servir de prétexte pour s'entraîner sur les
-workflows Git / CI / CD / promotion d'artefacts.
 """
 
-from fastapi import FastAPI
-from app.metrics import metrics, metrics_middleware
+import time
+from fastapi import FastAPI, Request
+from app.middleware import combined_middleware
 
 app = FastAPI(title="devsecops-training-demo")
-app.middleware("http")(metrics_middleware)
+app.middleware("http")(combined_middleware)
 
 
 @app.get("/health")
 def health() -> dict:
-    """Endpoint de santé, utilisé par les tests et les futurs checks de déploiement."""
+    """Endpoint de santé."""
     return {"server status": "ok"}
 
 
 @app.get("/version")
 def version() -> dict:
-    """
-    Endpoint volontairement présent pour illustrer la traçabilité :
-    en pratique, on pourrait injecter ici le tag/commit via une variable d'env
-    positionnée au moment du build Docker (ex: APP_VERSION).
-    """
+    """Traçabilité : version injectée au build."""
     import os
 
     return {"version": os.getenv("APP_VERSION", "dev")}
@@ -33,7 +26,7 @@ def version() -> dict:
 
 @app.get("/info")
 def info() -> dict:
-    """Endpoint d'information sur l'application, utile pour le monitoring."""
+    """Informations sur l'application."""
     import os
 
     return {
@@ -48,7 +41,7 @@ _request_count = 0
 
 @app.get("/stats")
 def stats() -> dict:
-    """Retourne un compteur simple du nombre d'appels à cet endpoint."""
+    """Compteur d'appels."""
     global _request_count
     _request_count += 1
     return {"stats_calls": _request_count}
@@ -56,13 +49,13 @@ def stats() -> dict:
 
 @app.get("/ping")
 def ping() -> dict:
-    """Endpoint minimal de test, pour valider rapidement le cycle CI/CD."""
+    """Endpoint minimal de test."""
     return {"pong": True}
 
 
 @app.get("/about")
 def about() -> dict:
-    """Informations générales sur le projet."""
+    """Informations générales."""
     return {
         "project": "devsecops-training-demo",
         "author": "adell2024",
@@ -72,5 +65,31 @@ def about() -> dict:
 
 @app.get("/metrics")
 def get_metrics() -> dict:
-    """Endpoint de métriques : compteurs de requêtes par méthode/statut."""
+    """Compteurs de requêtes."""
+    from app.metrics import metrics
+
     return {"metrics": metrics.get_all()}
+
+
+@app.get("/rate-limit-status")
+def rate_limit_status(request: Request) -> dict:
+    """État du rate limiter pour cette IP."""
+    from app.rate_limit import rate_limiter
+
+    client_ip = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else "unknown"
+    )
+    client_ip = client_ip.split(",")[0].strip()
+
+    now = time.time()
+    window_start = now - rate_limiter.window_seconds
+    recent = [
+        ts for ts in rate_limiter._requests.get(client_ip, []) if ts > window_start
+    ]
+
+    return {
+        "client_ip": client_ip,
+        "max_requests": rate_limiter.max_requests,
+        "current_count": len(recent),
+        "window_seconds": rate_limiter.window_seconds,
+    }
