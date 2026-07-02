@@ -93,3 +93,12 @@ def rate_limit_status(request: Request) -> dict:
         "current_count": len(recent),
         "window_seconds": rate_limiter.window_seconds,
     }
+
+
+@app.get("/welcome")
+def welcome() -> dict:
+    """Message de bienvenue."""
+    return {
+        "message": "Bienvenue sur devsecops-training-demo",
+        "documentation": "/docs",
+    }

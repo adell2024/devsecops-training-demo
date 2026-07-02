@@ -97,3 +97,12 @@ def test_about() -> None:
     body = response.json()
     assert body["project"] == "devsecops-training-demo"
     assert body["author"] == "adell2024"
+
+
+def test_welcome() -> None:
+    client = TestClient(app)
+    response = client.get("/welcome")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"] == "Bienvenue sur devsecops-training-demo"
+    assert body["documentation"] == "/docs"
