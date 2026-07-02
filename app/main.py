@@ -102,3 +102,20 @@ def welcome() -> dict:
         "message": "Bienvenue sur devsecops-training-demo",
         "documentation": "/docs",
     }
+
+
+@app.get("/config")
+def config() -> dict:
+    """
+    Retourne la configuration de l'application.
+    Utile pour le debugging, le monitoring et la vérification du déploiement.
+    """
+    from app.config import get_config
+
+    cfg = get_config()
+    return {
+        "version": cfg.version,
+        "environment": cfg.environment,
+        "debug": cfg.debug,
+        "features": cfg.features,
+    }
